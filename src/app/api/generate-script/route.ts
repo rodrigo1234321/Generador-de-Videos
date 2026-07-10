@@ -75,40 +75,68 @@ const SYSTEM_INSTRUCTION = `
   - Mantén el tono enérgico y entretenido.
 `;
 
-/** Llama a Gemini y devuelve el guion ya parseado y validado. */
+/** Llama a Gemini y devuelve el guion ya parseado y validado con reintentos automáticos para cuotas. */
 async function generateValidatedScript(prompt: string): Promise<VideoScript> {
-  const response = await ai.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: `Tema del video: ${prompt}`,
-    config: {
-      systemInstruction: SYSTEM_INSTRUCTION,
-      responseMimeType: 'application/json',
-      responseSchema: GEMINI_RESPONSE_SCHEMA as any,
-    },
-  });
+  let attempts = 0;
+  const maxAttempts = 3;
 
-  if (!response.text) {
-    throw new Error('No se recibió respuesta de Gemini');
+  while (attempts < maxAttempts) {
+    try {
+      const response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: `Tema del video: ${prompt}`,
+        config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
+          responseMimeType: 'application/json',
+          responseSchema: GEMINI_RESPONSE_SCHEMA as any,
+        },
+      });
+
+      if (!response.text) {
+        throw new Error('No se recibió respuesta de Gemini');
+      }
+
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('--- GEMINI RAW RESPONSE ---', response.text);
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(response.text);
+      } catch {
+        throw new Error('Gemini devolvió un JSON inválido');
+      }
+
+      const result = VideoScriptSchema.safeParse(parsed);
+      if (!result.success) {
+        console.error('Guion generado no cumple el schema esperado:', result.error.flatten());
+        throw new Error('El guion generado no tiene el formato esperado');
+      }
+
+      return result.data;
+    } catch (error: any) {
+      attempts++;
+      const errorStr = JSON.stringify(error) || '';
+      const errorMessage = error.message || '';
+      const isRateLimit = 
+        errorMessage.includes('RESOURCE_EXHAUSTED') || 
+        errorMessage.includes('429') || 
+        error.status === 429 || 
+        error.statusCode === 429 || 
+        errorStr.includes('429') || 
+        errorStr.includes('quota') ||
+        errorStr.includes('RESOURCE_EXHAUSTED');
+
+      if (isRateLimit && attempts < maxAttempts) {
+        const waitTime = attempts * 7000; // 7s, 14s...
+        console.warn(`[Gemini API] Límite de cuota excedido (429/RESOURCE_EXHAUSTED). Reintentando en ${waitTime / 1000}s... (Intento ${attempts}/${maxAttempts})`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      } else {
+        throw error;
+      }
+    }
   }
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('--- GEMINI RAW RESPONSE ---', response.text);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(response.text);
-  } catch {
-    throw new Error('Gemini devolvió un JSON inválido');
-  }
-
-  const result = VideoScriptSchema.safeParse(parsed);
-  if (!result.success) {
-    console.error('Guion generado no cumple el schema esperado:', result.error.flatten());
-    throw new Error('El guion generado no tiene el formato esperado');
-  }
-
-  return result.data;
+  throw new Error('Excedidos los intentos de generación del guion debido a límites de cuota');
 }
 
 export async function POST(request: Request) {
