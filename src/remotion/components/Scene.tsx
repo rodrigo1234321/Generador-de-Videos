@@ -6,9 +6,10 @@ interface SceneProps {
   imageUrl: string;
   narrationText: string;
   durationInFrames: number;
+  subtitles?: Array<{ text: string; start: number; end: number }>;
 }
 
-export const Scene: React.FC<SceneProps> = ({ imageUrl, narrationText, durationInFrames }) => {
+export const Scene: React.FC<SceneProps> = ({ imageUrl, narrationText, durationInFrames, subtitles }) => {
   const frame = useCurrentFrame();
 
   // Ken Burns: Slow zoom in
@@ -52,7 +53,11 @@ export const Scene: React.FC<SceneProps> = ({ imageUrl, narrationText, durationI
         }}
       />
 
-      <SubtitleOverlay text={narrationText} />
+      <SubtitleOverlay 
+        fallbackText={narrationText} 
+        durationInFrames={durationInFrames} 
+        subtitles={subtitles} 
+      />
     </div>
   );
 };

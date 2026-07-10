@@ -100,11 +100,15 @@ export default function GeneratePage() {
                 </div>
                 <VideoPlayer
                   audioUrl={video.audio_url}
-                  scenes={scenes.map((s: any) => ({
-                    imageUrl: s.image_url || 'https://image.pollinations.ai/prompt/placeholder',
-                    narrationText: s.narration,
-                    durationSeconds: s.duration_seconds || 4,
-                  }))}
+                  scenes={scenes.map((s: any, idx: number) => {
+                    const scriptScene = video.script?.scenes?.[idx];
+                    return {
+                      imageUrl: s.image_url || 'https://image.pollinations.ai/prompt/placeholder',
+                      narrationText: s.narration,
+                      durationSeconds: s.duration_seconds || 4,
+                      subtitles: scriptScene?.subtitles || [],
+                    };
+                  })}
                   durationSeconds={video.duration_seconds || 15}
                 />
               </div>

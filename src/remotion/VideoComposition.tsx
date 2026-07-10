@@ -6,6 +6,7 @@ export interface SceneData {
   imageUrl: string;
   narrationText: string;
   durationSeconds: number;
+  subtitles?: Array<{ text: string; start: number; end: number }>;
 }
 
 interface VideoCompositionProps {
@@ -29,6 +30,7 @@ export const VideoComposition: React.FC<VideoCompositionProps> = ({ audioUrl, sc
                 imageUrl={scene.imageUrl}
                 narrationText={scene.narrationText}
                 durationInFrames={durationInFrames}
+                subtitles={scene.subtitles}
               />
             </Series.Sequence>
           );
