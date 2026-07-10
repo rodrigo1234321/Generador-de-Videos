@@ -12,10 +12,10 @@ export const RemotionRoot: React.FC = () => {
         width={1080}
         height={1920}
         calculateMetadata={({ inputProps }: { inputProps: any }) => {
-          const durationSeconds = inputProps.durationSeconds || 30;
+          const durationSeconds = inputProps?.durationSeconds || 30;
           return {
             durationInFrames: Math.ceil(durationSeconds * 30),
-            props: inputProps,
+            props: inputProps || {},
           };
         }}
         defaultProps={{
