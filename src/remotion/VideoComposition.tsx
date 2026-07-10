@@ -14,7 +14,7 @@ interface VideoCompositionProps {
   scenes: SceneData[];
 }
 
-export const VideoComposition: React.FC<VideoCompositionProps> = ({ audioUrl, scenes }) => {
+export const VideoComposition: React.FC<VideoCompositionProps> = ({ audioUrl, scenes = [] }) => {
   const fps = 30;
 
   return (
