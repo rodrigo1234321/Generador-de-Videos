@@ -13,6 +13,33 @@ async function askQuestion(query) {
   }));
 }
 
+// Helper robusto para buscar un selector en el frame principal y en cualquier iframe secundario de la página
+async function waitForSelectorInAnyFrame(page, selector, timeoutMs = 60000) {
+  const startTime = Date.now();
+  console.log(`Buscando selector "${selector}" en todos los frames...`);
+  
+  while (Date.now() - startTime < timeoutMs) {
+    // 1. Intentar en el frame principal
+    const mainEl = await page.$(selector).catch(() => null);
+    if (mainEl) return { element: mainEl, frame: page };
+
+    // 2. Intentar en todos los iframes activos
+    const frames = page.frames();
+    for (const frame of frames) {
+      try {
+        const el = await frame.$(selector);
+        if (el) return { element: el, frame };
+      } catch (e) {
+        // Ignorar errores de acceso a frames (ej. cross-origin)
+      }
+    }
+
+    // Esperar 1.5 segundos antes del siguiente intento
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error(`Timeout: No se encontró el selector "${selector}" en ningún frame tras ${timeoutMs / 1000}s.`);
+}
+
 async function uploadToTikTok(videoPath, caption) {
   console.log(`=== INICIANDO SUBIDA A TIKTOK EN EL NAVEGADOR ===`);
   console.log(`Video: ${path.basename(videoPath)}`);
@@ -21,89 +48,83 @@ async function uploadToTikTok(videoPath, caption) {
   // Lanzar Chrome visible (headful) con sesión persistente
   const browser = await puppeteer.launch({
     headless: false,
-    defaultViewport: null, // Ajustar pantalla completa
+    defaultViewport: null,
     args: [
-      '--disable-blink-features=AutomationControlled', // Evita que TikTok detecte que es un bot
+      '--disable-blink-features=AutomationControlled', // Quita la bandera navigator.webdriver
       '--start-maximized'
     ],
-    userDataDir: path.join(__dirname, '..', 'tiktok-session') // Guarda la sesión (cookies/login)
+    userDataDir: path.join(__dirname, '..', 'tiktok-session') // Guarda cookies y logins
   });
 
   const page = await browser.newPage();
   
-  // Evadir fingerprinting básico
+  // Evadir bot-detection básico
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 
   try {
-    console.log('Navegando a la página de carga de TikTok Studio...');
-    // Redirige a la página de carga oficial de TikTok Studio
+    console.log('Navegando a TikTok Studio...');
     await page.goto('https://www.tiktok.com/tiktokstudio/upload?lang=es', {
       waitUntil: 'networkidle2',
       timeout: 120000
     });
 
-    // 1. Comprobar si está logueado buscando el input de subida de archivos
-    let loggedIn = false;
-    try {
-      await page.waitForSelector('input[type="file"]', { timeout: 6000 });
-      loggedIn = true;
-    } catch (e) {
-      // Si no encuentra el input, requiere inicio de sesión
-    }
+    console.log('\n============================================================');
+    console.log('Esperando inicio de sesión y pantalla de carga...');
+    console.log('Si no has iniciado sesión, por favor hazlo manualmente en la ventana de Chrome.');
+    console.log('El script continuará automáticamente al detectar la zona de subida.');
+    console.log('============================================================\n');
 
-    if (!loggedIn) {
-      console.log('\n============================================================');
-      console.log('¡ATENCIÓN! No tienes una sesión activa en TikTok.');
-      console.log('1. Por favor, INICIA SESIÓN manualmente en la ventana de Chrome que se abrió.');
-      console.log('2. Dirígete a la sección de carga (TikTok Studio → Subir).');
-      console.log('El script detectará tu inicio de sesión automáticamente.');
-      console.log('============================================================\n');
+    // Esperar un máximo de 10 minutos (600000ms) a que el input de archivos esté disponible
+    const uploadInputInfo = await waitForSelectorInAnyFrame(page, 'input[type="file"]', 600000);
+    const { element: fileInput, frame: targetFrame } = uploadInputInfo;
+    console.log('✓ ¡Pantalla de subida detectada!');
 
-      // Esperar un tiempo prolongado (10 minutos) a que el usuario se loguee
-      await page.waitForSelector('input[type="file"]', { timeout: 600000 });
-      console.log('✓ ¡Sesión detectada exitosamente! Continuando con la carga...');
-    }
-
-    // 2. Subir el archivo de video
-    console.log('Seleccionando y subiendo el video...');
-    const fileInput = await page.$('input[type="file"]');
+    console.log('Subiendo el archivo de video...');
     await fileInput.uploadFile(videoPath);
-    console.log('✓ Archivo cargado. Procesando el video (esto puede tardar unos segundos)...');
+    console.log('✓ Video seleccionado. Esperando a que cargue y procese...');
 
-    // 3. Esperar a que el editor de subtítulos/descripción esté disponible
-    // Usamos el selector genérico contenteditable o el rol textbox de TikTok
-    console.log('Esperando a que se habilite el cuadro de texto...');
+    // Esperar a que aparezca la caja de texto en el frame correcto
+    console.log('Esperando que aparezca la caja de descripción...');
     const captionSelector = 'div[contenteditable="true"], div[role="textbox"], [data-e2e="caption-input"]';
-    await page.waitForSelector(captionSelector, { timeout: 90000 });
     
-    // Enfocar y escribir la descripción
+    // Polling para encontrar el cuadro de texto dentro del frame correcto
+    let captionInput = null;
+    const captionStartTime = Date.now();
+    while (Date.now() - captionStartTime < 90000) {
+      captionInput = await targetFrame.$(captionSelector).catch(() => null);
+      if (captionInput) break;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+
+    if (!captionInput) {
+      throw new Error("No se encontró el cuadro de descripción en el frame donde se subió el video.");
+    }
+
     console.log('Escribiendo la descripción y los hashtags...');
-    await page.focus(captionSelector);
+    await captionInput.focus();
     
-    // Borrar texto previo por si acaso
+    // Borrar contenido por si tiene el nombre del archivo
     await page.keyboard.down('Control');
     await page.keyboard.press('A');
     await page.keyboard.up('Control');
     await page.keyboard.press('Backspace');
     
-    // Escribir el nuevo título/hashtags letra por letra de forma natural
-    await page.keyboard.type(caption, { delay: 50 });
-    console.log('✓ Descripción escrita exitosamente.');
+    // Escribir caption de forma fluida
+    await page.keyboard.type(caption, { delay: 45 });
+    console.log('✓ Descripción y hashtags añadidos.');
 
-    // 4. Modo Seguro: Dejar la pestaña abierta para que el usuario revise y publique manualmente
     console.log('\n============================================================');
-    console.log('✓ ¡TODO LISTO! El video y los hashtags ya fueron cargados.');
-    console.log('Para evitar shadowbans de TikTok (que penaliza los clics directos de bots),');
-    console.log('por favor revisa el video en pantalla y haz clic en el botón');
-    console.log('rojo "Publicar" (o programar) manualmente.');
+    console.log('✓ ¡PROCESO DE SUBIDA COMPLETADO CON ÉXITO!');
+    console.log('Revisa el video en la pantalla de Chrome y haz clic en');
+    console.log('"Publicar" o "Programar" manualmente cuando desees.');
     console.log('============================================================\n');
 
-    await askQuestion('Presiona ENTER en esta consola cuando hayas terminado para cerrar el navegador...');
-    
+    await askQuestion('Presiona ENTER en esta consola cuando desees cerrar la ventana del navegador...');
+
   } catch (error) {
-    console.error('✗ ERROR EN EL NAVEGADOR:', error.message || error);
+    console.error('\n✗ ERROR EN LA AUTOMATIZACIÓN:', error.message || error);
   } finally {
     console.log('Cerrando navegador...');
     await browser.close();
@@ -111,14 +132,12 @@ async function uploadToTikTok(videoPath, caption) {
   }
 }
 
-// Permitir ejecución directa de prueba
 if (require.main === module) {
   const videoPath = process.argv[2];
   const caption = process.argv[3] || '¡Video generado automáticamente! #ia #automatizacion';
   
   if (!videoPath) {
     console.error('Error: Proporciona la ruta del video.');
-    console.log('Uso: node scripts/upload-tiktok.js "ruta/al/video.mp4" "Mi caption"');
     process.exit(1);
   }
   
