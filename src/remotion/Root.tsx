@@ -8,13 +8,20 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="vertical-video"
         component={VideoComposition as any}
-        durationInFrames={900} // Default duration, overwritten by inputProps
         fps={30}
         width={1080}
         height={1920}
+        calculateMetadata={({ inputProps }: { inputProps: any }) => {
+          const durationSeconds = inputProps.durationSeconds || 30;
+          return {
+            durationInFrames: Math.ceil(durationSeconds * 30),
+            props: inputProps,
+          };
+        }}
         defaultProps={{
           audioUrl: '',
           scenes: [] as any[],
+          durationSeconds: 30,
         }}
       />
     </>
