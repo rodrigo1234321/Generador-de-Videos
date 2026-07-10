@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated videos and automation sessions
+*.mp4
+/tiktok-session/
+/chrome-profile/
+/temp-props.json
+
