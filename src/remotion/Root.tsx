@@ -11,11 +11,13 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         width={1080}
         height={1920}
-        calculateMetadata={({ inputProps }: { inputProps: any }) => {
-          const durationSeconds = inputProps?.durationSeconds || 30;
+        calculateMetadata={({ inputProps, defaultProps }: { inputProps: any; defaultProps: any }) => {
+          const mergedProps = { ...defaultProps, ...inputProps };
+          console.log("=== REMOTION MERGED PROPS ===", JSON.stringify(mergedProps));
+          const durationSeconds = mergedProps.durationSeconds || 30;
           return {
             durationInFrames: Math.ceil(durationSeconds * 30),
-            props: inputProps || {},
+            props: mergedProps,
           };
         }}
         defaultProps={{
